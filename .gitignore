@@ -1,0 +1,6 @@
+entire-local
+dist/
+coverage.txt
+coverage.html
+*.out
+.DS_Store
