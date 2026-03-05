@@ -1,0 +1,84 @@
+Implement the following plan:
+
+# Plan: Chat-Style Transcript + Markdown Rendering
+
+## Context
+The transcript tab currently shows user/assistant messages as plain text with basic left-border styling. The user wants it to feel like a real chat conversation and have markdown properly rendered (headers, code blocks, bold, lists, etc.) — especially for assistant responses which are typically markdown.
+
+## Approach
+Add `github.com/charmbracelet/glamour` for terminal markdown rendering. Redesign the transcript tab as a chat view and render markdown in assistant messages, the Plan tab, and the Overview tab's plan preview and context sections.
+
+## Changes
+
+### 1. Add glamour dependency
+- `go get github.com/charmbracelet/glamour`
+
+### 2. Create markdown renderer helper — `pkg/ui/dashboard/markdown.go` (new file)
+- `renderMarkdown(content string, width int) string` — creates a glamour `TermRenderer` with `DarkStyle`, word-wrap to `width`, renders content, trims trailing whitespace
+- Used by transcript (assistant messages), Plan tab, and Overview tab
+- Cache or create renderer per call (glamour renderers are cheap)
+
+### 3. Redesign transcript as chat — `pkg/ui/dashboard/transcript.go`
+Current: plain text with basic left-border blocks for all messages.
+New layout:
+```
+  ┃ You                                          3:42 PM
+  ┃ Implement the new REST API endpoint
+
+    Assistant                                     3:42 PM
+    │ Here's my plan for implementing the endpoint:
+    │
+    │ ## Steps                        ← glamour-rendered markdown
+    │ 1. Create the handler
+    │ 2. Add routes
+    │
+    │   func handler(w http.ResponseWriter, r *http.Request) {
+    │       // ...
+    │   }
+
+    [Read] [Edit] [Bash]              ← tool badges grouped on one line
+    [3 results]                       ← collapsed tool results with count
+
+    Assistant                                     3:43 PM
+    │ Done! I've created the handler and added routes.
+```
+
+Key design decisions:
+- **User messages**: Orange thick left border `┃`, "You" label, plain text (user prompts are rarely markdown)
+- **Assistant messages**: Subtle left border `│`, "Assistant" label, **markdown rendered via glamour**
+- **Tool use**: Consecutive tool entries grouped into a single line of `[toolname]` badges
+- **Tool results**: Consecutive results collapsed to `[N results]` count
+- **Timestamps**: Right-aligned, dimmed, from `TranscriptEntry.Timestamp`
+- **Spacing**: Empty line between each message group
+
+### 4. Render markdown in Plan tab — `pkg/ui/dashboard/checkpoint_detail.go`
+- Replace `wordWrap(plan, contentWidth)` with `renderMarkdown(plan, contentWidth)` in `renderTabPlan`
+- Gives proper heading styles, code blocks, lists, etc.
+
+### 5. Render markdown in Overview tab — `pkg/ui/dashboard/checkpoint_detail.go`
+- Plan preview: render first ~20 lines of plan through glamour instead of plain dimStyle
+- Context section: render through glamour (context.md is often markdown)
+
+### 6. Clean up unused styles — `pkg/ui/dashboard/styles.go`
+- Remove `userBubbleStyle` and `assistantBlockStyle` (replaced by the new chat layout which builds styles inline with role labels)
+- Add `roleLabelStyle` for "You" / "Assistant" labels
+
+## Files Modified
+
+1. `go.mod` / `go.sum` — add `github.com/charmbracelet/glamour`
+2. `pkg/ui/dashboard/markdown.go` — **new file**, `renderMarkdown()` helper
+3. `pkg/ui/dashboard/transcript.go` — full rewrite: chat layout, glamour for assistant messages, tool grouping, timestamps
+4. `pkg/ui/dashboard/checkpoint_detail.go` — use `renderMarkdown` in Plan tab and Overview tab
+5. `pkg/ui/dashboard/styles.go` — add `roleLabelStyle`, remove unused bubble styles
+
+## Verification
+- `make build` compiles
+- `make test` passes
+- Run `./entire-local` in a repo with entire.io data
+- Verify: transcript shows chat-like layout with role labels
+- Verify: assistant messages render markdown (headers, code blocks, bold, lists)
+- Verify: Plan tab renders full markdown
+- Verify: scrolling still works in all tabs
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/arvos/.claude/projects/-Users-arvos-Tactic-workspaces-workspace-entire-local-cli-entire-local/1af5245c-55dd-4657-8862-49f9d310e4f9.jsonl
