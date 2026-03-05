@@ -1,0 +1,126 @@
+Implement the following plan:
+
+# Plan: Redesign TUI — Full-Width Layout + Richer Checkpoint Info
+
+## Context
+The current TUI is functional but visually sparse. Stat cards are hardcoded to 20 chars wide, the activity chart caps at 60 chars, checkpoint rows are single flat lines, and the detail view only shows a basic file list + transcript dump. The user wants the TUI to fill the terminal and show more checkpoint data — closer to the entire.io web dashboard experience.
+
+## Overview Screen Changes
+
+### 1. Responsive stat cards — `overview.go`, `styles.go`
+- Remove `Width(20)` from `statCardStyle` in `styles.go`
+- Compute `cardWidth = (width - 10) / 4` at render time (min 18, max 40)
+- Pass `cardWidth` into a new `renderStatCardDynamic(label, value, sub string, cardWidth int)` that replaces the current `renderStatCard`
+
+### 2. Wider activity chart — `overview.go`
+- Remove the `if barWidth > 60 { barWidth = 60 }` cap
+- Let chart stretch to `width - 16` (still minimum 10)
+
+### 3. Multi-line checkpoint rows — `checkpoint_list.go`, `styles.go`
+Each checkpoint becomes 3 lines instead of 1:
+```
+ > feat/new-api                                a1b2c3d   3h ago
+   Claude Code 87%   3,241 tokens   2m 34s   +48/-12  5 files
+   Implement the new REST API endpoint for user profiles
+```
+- **Line 1:** Branch (bold, blue) left, commit hash + time ago right
+- **Line 2:** Agent badge (orange), tokens, duration, diff stats, file count
+- **Line 3:** Context/prompt (dimmed, truncated to width)
+- Selected row: left border accent `▎` in orange
+- Update visible height calc: `visibleHeight = (height - headerLines) / 4` (3 lines + 1 separator)
+
+### 4. Full height usage — `dashboard.go`
+- Render overview, measure actual lines, give all remaining height to the checkpoint list
+- The list fills its allocated space (no floating footer gap)
+
+### 5. New styles — `styles.go`
+Add: `tabActiveStyle`, `tabInactiveStyle`, `sectionHeaderStyle`, `userBubbleStyle`, `assistantBlockStyle`, `scrollIndicatorStyle`
+
+## Detail Screen Changes
+
+### 6. Tabbed sub-views — `messages.go`, `dashboard.go`, `checkpoint_detail.go`
+Add `detailTab` type with 4 tabs:
+- `tabOverview` (default) — commit info + prompt + context + plan preview
+- `tabFiles` — per-file diff stats with +/- bars
+- `tabTranscript` — scrollable transcript with message bubbles
+- `tabPlan` — full plan.md rendered
+
+Tab bar rendered at top of detail view:
+```
+  [Overview]  Files  Transcript  Plan
+```
+Active tab: orange/bold. Inactive: dim. Switch with `tab`/`shift+tab` or `1/2/3/4`.
+
+### 7. Tab: Overview — `checkpoint_detail.go`
+Full-width single column showing:
+- Commit hash + branch + agent badge + tokens + duration + diff summary
+- Prompt section with bordered box
+- Context section
+- Plan preview (first ~10 lines)
+- Scrollable with j/k
+
+### 8. Tab: Files — `checkpoint_detail.go`
+Per-file diff stats (parsed from diff):
+```
+Files (5)                                      +48 -12 total
+  handlers/users.go                            +32  -2
+  router.go                                     +5  -0
+```
+Add `parseDiffPerFile(diff string) []fileDiffStat` helper struct + function.
+
+### 9. Tab: Transcript — `transcript.go`
+- User messages: orange `▎` left border, content in bordered block
+- Assistant messages: indented with subtle left border
+- Tool use: inline `[toolname]` badges, grouped
+- Tool results: collapsed to `[result]`
+- Scrollable with j/k, show position indicator `(3/47)`
+
+### 10. Tab: Plan — `checkpoint_detail.go`
+- Full plan.md content, word-wrapped to terminal width
+- "No plan available" in dim if empty
+- Scrollable with j/k
+
+### 11. Scrolling + new keys — `dashboard.go`, `keys.go`
+Add to model: `detailTab`, `scrollOffset`, `maxScroll` fields.
+In `handleDetailKeys`:
+- `j/k` scroll within current tab content
+- `tab`/`shift+tab` cycle tabs, `1-4` jump to tab
+- Reset `scrollOffset = 0` on tab switch
+- Reset `detailTab = tabOverview` when entering detail view
+
+New key bindings in `keys.go`: `Tab`, `ShiftTab`, `Num1-4`
+
+### 12. Updated footer + help — `dashboard.go`, `help.go`
+- Detail footer: `esc back  j/k scroll  tab switch  1-4 tabs  ? help  q quit`
+- Help overlay: add tab/scroll bindings
+
+## Files Modified (in implementation order)
+
+1. `pkg/ui/dashboard/messages.go` — add `detailTab` type + constants
+2. `pkg/ui/dashboard/keys.go` — add Tab, ShiftTab, Num1-4 bindings
+3. `pkg/ui/dashboard/styles.go` — remove Width(20), add ~6 new styles
+4. `pkg/ui/dashboard/dashboard.go` — new model fields, tab/scroll key handling, height allocation
+5. `pkg/ui/dashboard/overview.go` — responsive stat cards, uncapped chart
+6. `pkg/ui/dashboard/checkpoint_list.go` — multi-line rows, selected highlight
+7. `pkg/ui/dashboard/checkpoint_detail.go` — tab bar, 3 tab renderers, per-file diff parsing
+8. `pkg/ui/dashboard/transcript.go` — message bubbles, scroll offset, position indicator
+9. `pkg/ui/dashboard/help.go` — add new bindings to help overlay
+
+## Verification
+- `make build` compiles
+- `make test` passes
+- Run `./entire-local` in a repo with entire.io data at various terminal sizes (80x24, 120x40, 200x60)
+- Verify: stat cards stretch across width, checkpoint list fills remaining height
+- Verify: detail tabs switch with tab/1-4, j/k scrolls within tabs
+- Verify: going back to overview preserves cursor position
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/arvos/.claude/projects/-Users-arvos-Tactic-workspaces-workspace-entire-local-cli-entire-local/caae9f6a-1739-4a68-aa67-f82c86715889.jsonl
+
+---
+
+Could we make that the checkpoints are visualized as a chat and that we somehow render the markdown?
+
+---
+
+[Request interrupted by user for tool use]
