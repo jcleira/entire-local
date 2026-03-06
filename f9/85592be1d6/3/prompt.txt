@@ -1,0 +1,30 @@
+Implement the following plan:
+
+# Plan: Fix scrolling in detail view tabs
+
+## Context
+After adding full diff rendering to the Files tab, j/k scrolling doesn't work. Root cause: `m.maxScroll` (the model struct field) is **never written to** — it stays 0. The Down handler in `handleDetailKeys` (`dashboard.go:203`) gates on `m.scrollOffset < m.maxScroll`, so scrollOffset can never increase past 0.
+
+The View functions compute a local `maxScroll` variable for clamping display, but that never flows back to the struct field (View is a value receiver).
+
+## Change
+
+### `pkg/ui/dashboard/dashboard.go`
+
+1. **Remove `maxScroll int` field** from the model struct (line 31) — it's never set and misleading.
+
+2. **Add `contentLineEstimate()` method** on model that returns a rough upper-bound line count for the active tab:
+   - `tabFiles`: `strings.Count(m.detail.Diff, "\n") + len(parseDiffStats(m.detail.Diff).files) + 10`
+   - `tabPlan`: `strings.Count(m.detail.Plan, "\n") + 10`
+   - `tabTranscript`: `len(m.transcript) * 5`
+
+3. **Update Down handler** in `handleDetailKeys` (line 202-206): replace `m.maxScroll` with `m.contentLineEstimate()`.
+
+The estimate is intentionally generous — the View already clamps `scrollOffset` to the precise max during rendering. The estimate just prevents unbounded growth.
+
+## Verification
+- `make build && make test`
+- Run TUI, enter a checkpoint with a long diff, verify j/k scrolling works on Files, Transcript, and Plan tabs
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/arvos/.claude/projects/-Users-arvos-Tactic-workspaces-workspace-entire-local-cli-entire-local/38a313c5-5d9a-4ce6-901f-f426725b2db0.jsonl
