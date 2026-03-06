@@ -1,0 +1,128 @@
+Implement the following plan:
+
+# Plan: Render Markdown in Prompt Section
+
+## Context
+The Prompt section in checkpoint detail's Overview tab displays raw markdown text. The Context and Plan sections already use `renderMarkdown()` (glamour-based), but the Prompt section uses plain `wordWrap()`. When a prompt contains markdown (headers, code blocks, lists, etc.), it shows as unformatted text.
+
+## Change
+
+### `pkg/ui/dashboard/checkpoint_detail.go` — line 89
+
+Replace `wordWrap` with `renderMarkdown` for the Prompt content:
+
+```go
+// Before (line 89):
+promptBox := panelStyle.Width(contentWidth).Render(wordWrap(cp.Prompt, contentWidth-4))
+
+// After:
+rendered := renderMarkdown(cp.Prompt, contentWidth-4)
+promptBox := panelStyle.Width(contentWidth).Render(rendered)
+```
+
+This matches how Context (line 99) and Plan (lines 115, 237) already render their content.
+
+## Files Modified
+- `pkg/ui/dashboard/checkpoint_detail.go` — one line change (line 89)
+
+## Verification
+- `make build`
+- Visual: prompt content with markdown (headers, code blocks, lists) renders with formatting instead of raw text
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/arvos/.claude/projects/-Users-arvos-Tactic-workspaces-workspace-entire-local-cli-entire-local/67920851-1aa5-4602-91b5-bc6bc1ad4386.jsonl
+
+---
+
+it doesn't look well:
+
+---
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│  Checkpoint Detail                                                                                                                                                                                              │
+│   checkpoint 380d357  master  Claude Code 100%  tokens: 42  1 files                                                                                                                                             │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│    [Overview]   Files    Transcript    Plan                                                                                                                                                                     │
+│                                                                                                                                                                                                                 │
+│   Prompt                                                                                                                                                                                                        │
+│   ╭─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮   │
+│   │                                                                                                                                                                                                         │   │
+│   │   Implement the following plan:                                                                                                                                                                         │   │
+│   │                                                                                                                                                                                                         │   │
+│   │    Plan: Improve  subtle  Color for Readability                                                                                                                                                         │   │
+│   │                                                                                                                                                                                                         │   │
+│   │   ## Context                                                                                                                                                                                            │   │
+│   │                                                                                                                                                                                                         │   │
+│   │   The  subtle  color variable ( lipgloss.Color("241") ) is too dark on dark terminal backgrounds. It's used for panel borders, stat labels, dim text, inactive tabs, hash styles, help                  │   │
+│   │   descriptions, tool badges, scroll indicators, and more — all of which are hard to read.                                                                                                               │   │
+│   │                                                                                                                                                                                                         │   │
+│   │   ## Change                                                                                                                                                                                             │   │
+│   │                                                                                                                                                                                                         │   │
+│   │   ###  pkg/ui/dashboard/styles.go  — line 11                                                                                                                                                            │   │
+│   │                                                                                                                                                                                                         │   │
+│   │   Change  subtle  from  "241"  to  "245" :                                                                                                                                                              │   │
+│   │                                                                                                                                                                                                         │   │
+│   │     subtle = lipgloss.Color("245")                                                                                                                                                                      │   │
+│   │                                                                                                                                                                                                         │   │
+│   │    "241"  is ~#626262 (very dark gray).  "245"  is ~#8a8a8a (medium gray) — readable on dark backgrounds while still clearly secondary to primary content.                                              │   │
+│   │                                                                                                                                                                                                         │   │
+│   │   ### Styles affected (all via the  subtle  variable, no other changes needed)                                                                                                                          │   │
+│   │                                                                                                                                                                                                         │   │
+│   │   •  panelStyle  /  statCardStyle  border color                                                                                                                                                         │   │
+│   │   •  statLabelStyle ,  hashStyle ,  dimStyle ,  helpDescStyle ,  toolBadgeStyle ,  tabInactiveStyle ,  scrollIndicatorStyle  text color                                                                 │   │
+│   │                                                                                                                                                                                                         │   │
+│   │   ## Files Modified                                                                                                                                                                                     │   │
+│   │                                                                                                                                                                                                         │   │
+│   │   •  pkg/ui/dashboard/styles.go  — one line change                                                                                                                                                      │   │
+│   │                                                                                                                                                                                                         │   │
+│   │   ## Verification                                                                                                                                                                                       │   │
+│   │                                                                                                                                                                                                         │   │
+│   │   •  make build                                                                                                                                                                                         │   │
+│   │   • Visual: labels, borders, and dim text are noticeably more readable on dark backgrounds                                                                                                              │   │
+│   │                                                                                                                                                                                                         │   │
+│   │   If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/arvos/.claude/projects/-         │   │
+│   │   Users-                                                                                                                                                                                                │   │
+│   │   arvos-Tactic-workspaces-workspace-entire-local-cli-entire-local/4c9406fa-86be-4466-996c-b32d9393b2fe.jsonl                                                                                            │   │
+│   │                                                                                                                                                                                                         │   │
+│   │   --------                                                                                                                                                                                              │   │
+│   │                                                                                                                                                                                                         │   │
+│   │   way more please                                                                                                                                                                                       │   │
+│   ╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯   │
+│                                                                                                                                                                                                                 │
+│                                                                                                                                                                                                                 │
+│   Context                                                                                                                                                                                                       │
+│                                                                                                                                                                                                                 │
+│      Session Context                                                                                                                                                                                            │
+│                                                                                                                                                                                                                 │
+│     ## User Prompts                                                                                                                                                                                             │
+│                                                                                                                                                                                                                 │
+│     ### Prompt 1                                                                                                                                                                                                │
+│                                                                                                                                                                                                                 │
+│     Implement the following plan:                                                                                                                                                                               │
+│                                                                                                                                                                                                                 │
+│      Plan: Improve  subtle  Color for Readability                                                                                                                                                               │
+│                                                                                                                                                                                                                 │
+│     ## Context                                                                                                                                                                                                  │
+│                                                                                                                                                                                                                 │
+│     The  subtle  color variable ( lipgloss.Color("241") ) is too dark on dark terminal backgrounds. It's used for panel borders, stat labels, dim text, inactive tabs, hash styles, help descriptions,          │
+│     tool badges, scroll indicators, and more — all of which are hard to read.                                                                                                                                   │
+│
+---
+
+---
+
+I mean, it just don't work I see all the markdown
+
+---
+
+none of them, please don't yoiu see all the "#"?
+
+---
+
+what's the point of having the "Prompt" and "Context"? what's the difference?
+
+I think we could do better
+
+---
+
+[Request interrupted by user for tool use]
