@@ -1,0 +1,64 @@
+Implement the following plan:
+
+# Plan: Merge Prompt & Context into Single Section
+
+## Context
+The Overview tab in checkpoint detail shows two separate sections — "Prompt" and "Context" — that contain heavily overlapping content. The Context (`context.md`) typically wraps the same prompt text inside a "Session Context > User Prompts" structure, so users see the same information twice. Merging them into one section reduces noise.
+
+## Change
+
+### `pkg/ui/dashboard/checkpoint_detail.go` — `renderTabOverview` (lines 86-104)
+
+Replace the two separate Prompt/Context blocks with a single merged section:
+
+```go
+// Current (lines 86-104):
+if cp.Prompt != "" {
+    sb.WriteString(sectionHeaderStyle.Render("  Prompt"))
+    ...
+}
+if cp.Context != "" {
+    sb.WriteString(sectionHeaderStyle.Render("  Context"))
+    ...
+}
+
+// After — single merged section:
+if cp.Prompt != "" || cp.Context != "" {
+    sb.WriteString(sectionHeaderStyle.Render("  Prompt & Context"))
+    sb.WriteString("\n")
+    var combined string
+    if cp.Prompt != "" && cp.Context != "" {
+        combined = cp.Prompt + "\n\n---\n\n" + cp.Context
+    } else if cp.Prompt != "" {
+        combined = cp.Prompt
+    } else {
+        combined = cp.Context
+    }
+    rendered := renderMarkdown(combined, contentWidth-2)
+    for _, line := range strings.Split(rendered, "\n") {
+        sb.WriteString("  " + line + "\n")
+    }
+    sb.WriteString("\n")
+}
+```
+
+When both exist, they're joined with a horizontal rule separator. When only one exists, it's shown alone. Either way, single header: "Prompt & Context".
+
+## Files Modified
+- `pkg/ui/dashboard/checkpoint_detail.go` — replace two blocks with one (~lines 86-104)
+
+## Verification
+- `make build`
+- Visual: Overview tab shows a single "Prompt & Context" section instead of two separate redundant sections
+- Check with checkpoints that have: both fields, only prompt, only context, neither
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/arvos/.claude/projects/-Users-arvos-Tactic-workspaces-workspace-entire-local-cli-entire-local/83ea8135-ac8d-44d1-b34a-a01c542cd4b1.jsonl
+
+---
+
+nah sorry we are not quite making it, let's just show the transcript there, but checkout because the transcript section is missing quite the begining
+
+---
+
+[Request interrupted by user for tool use]
