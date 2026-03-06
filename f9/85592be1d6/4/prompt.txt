@@ -1,0 +1,65 @@
+Implement the following plan:
+
+# Plan: Show Transcript in Overview + Fix Missing Beginning
+
+## Context
+The Overview tab shows redundant Prompt & Context sections. Instead, show the transcript directly in Overview. But the transcript is missing its beginning: the first user message has `message.content` as a **plain string**, and `extractContent` only handles `message.content` as `[]contentBlock`.
+
+## Root Cause (jsonl.go:113-131)
+The first JSONL user entry looks like: `{"message":{"role":"user","content":"the prompt text"}}` — content is a string, not an array. `messageContent.Content` is `[]contentBlock`, so unmarshal fails. The string fallback tries to parse the entire `message` object as a string, which also fails. Result: empty content, entry dropped.
+
+## Changes
+
+### 1. Fix: `pkg/checkpoint/jsonl.go` — `extractContent` (after line 126)
+Add fallback for message objects with string content field:
+```go
+var ms struct {
+    Role    string `json:"role"`
+    Content string `json:"content"`
+}
+if json.Unmarshal(entry.Message, &ms) == nil && ms.Content != "" {
+    return ms.Content, ""
+}
+```
+
+### 2. `pkg/ui/dashboard/checkpoint_detail.go` — Replace Prompt & Context with transcript preview
+- Change `renderTabOverview` signature to accept `[]checkpoint.TranscriptEntry`
+- Remove the "Prompt & Context" block (lines 86-102)
+- Add transcript preview using `groupTranscriptEntries` + same rendering logic from `transcript.go`, limited to fit the overview
+- Show hint "press 3 for full transcript" at the bottom
+
+### 3. `pkg/ui/dashboard/dashboard.go:307` — Pass `m.transcript` to `renderTabOverview`
+
+## Files Modified
+- `pkg/checkpoint/jsonl.go`
+- `pkg/ui/dashboard/checkpoint_detail.go`
+- `pkg/ui/dashboard/dashboard.go`
+
+## Verification
+- `make build` — compiles cleanly
+- First user message now visible in both Overview and Transcript tabs
+- Transcript tab unchanged
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/arvos/.claude/projects/-Users-arvos-Tactic-workspaces-workspace-entire-local-cli-entire-local/17e4a8d1-13a9-45a4-9a6d-d2cd3d74f696.jsonl
+
+---
+
+okay if the transcript is now in the overview remove the Overview an dmove the transcript there.
+
+One more time, I don't see the markdown being rendeded on the transcript, please apply the markdown to everything coming from there
+
+---
+
+okay now let's fix the two other tabs:
+
+- The files doesn't show any but there were changes
+- THe plan doesn't show the plan but the plan was applied
+
+---
+
+could we render the diff in the files?
+
+---
+
+[Request interrupted by user for tool use]
