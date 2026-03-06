@@ -1,0 +1,59 @@
+Implement the following plan:
+
+# Plan: Redesign Checkpoint List as Clean Row View
+
+## Context
+The checkpoint list currently uses a multi-line block format (branch + metadata + context) with thick left-border selection. The user wants it to match the entire.io web UI: a clean, table-like row layout where each checkpoint is a single row with the prompt as the title, metadata on a second line, and stats right-aligned.
+
+**Target layout** (from web UI screenshot):
+```
+make sure vogon does not show up when enabling entire
+fc580cba724c  ·  2h ago  ·  Soph  ·  Claude Code          +19 / -1  ·  4 files  ·  1 session  ·  5.6k tokens
+```
+
+## Changes
+
+### 1. Add `Prompt` to `CheckpointSummary` — `pkg/checkpoint/types.go`
+- Add `Prompt string` field to `CheckpointSummary`
+
+### 2. Load prompt during listing — `pkg/checkpoint/loader.go`
+- In `loadSummary()`, read `prompt.txt` and set `summary.Prompt`
+- First line of prompt used as title (truncated to fit width)
+
+### 3. Rewrite `renderCheckpointBlock` — `pkg/ui/dashboard/checkpoint_list.go`
+New row layout:
+```
+  make sure vogon does not show up when enabling entire
+  fc580cb  ·  2h ago  ·  Claude Code                    +19 / -1  ·  4 files  ·  5.6k tokens
+```
+
+**Line 1**: Prompt text (bold/bright), truncated to width. Falls back to `Context` if no prompt, then branch name.
+**Line 2**: Left side: `hash · time ago · agent`. Right side: `+add / -del · N files · N.Nk tokens` — right-aligned.
+
+Key details:
+- Use `·` as separator (matching web UI)
+- Agent name styled with `agentBadgeStyle` (orange)
+- Diff stats: green `+N` / red `-N`
+- Token count formatted with `k` suffix for thousands (e.g., `5.6k`)
+- Each row is 2 lines + blank separator = 3 lines per entry
+
+### 4. Adjust visible height calculation — `pkg/ui/dashboard/checkpoint_list.go`
+- Change `visibleHeight` calculation from `(height - 2) / 4` to `(height - 2) / 3` since each row is now 3 lines (2 content + 1 blank)
+
+### 5. Add `formatTokensShort` helper — `pkg/ui/dashboard/checkpoint_list.go`
+- `formatTokensShort(n int) string` — returns `"5.6k"`, `"13.1k"`, or `"850"` for small numbers
+
+## Files Modified
+1. `pkg/checkpoint/types.go` — add `Prompt` field to `CheckpointSummary`
+2. `pkg/checkpoint/loader.go` — load `prompt.txt` in `loadSummary`
+3. `pkg/ui/dashboard/checkpoint_list.go` — rewrite `renderCheckpointBlock`, adjust height calc, add `formatTokensShort`
+
+## Verification
+- `make build` compiles
+- `make test` passes
+- Run `./entire-local` in a repo with entire.io data
+- Verify: checkpoint list shows prompt as title, metadata row with stats right-aligned
+- Verify: selection highlight, scrolling, and filtering still work
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/arvos/.claude/projects/-Users-arvos-Tactic-workspaces-workspace-entire-local-cli-entire-local/f57d75cd-d079-4ee4-9938-fe4915b20e62.jsonl
