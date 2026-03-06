@@ -1,0 +1,117 @@
+Implement the following plan:
+
+# Plan: Checkpoint List — Missing Data & Column Alignment
+
+## Context
+
+The checkpoint list currently shows limited data because the checkpoint metadata doesn't directly contain commit hashes, author names, or diff stats. However, we can correlate checkpoints to their master commits via timestamps — the orphan branch checkpoint is always created 2-7 seconds after the corresponding master commit. This lets us recover: commit message (title), author (engineer name), and diff stats (+/-).
+
+Currently missing from the TUI:
+1. No additions/deletions in green/red (no `diff.patch` in data, need `git diff --shortstat`)
+2. Right-side stats aren't fixed-width — they shift based on value lengths
+3. No engineer name (only "Claude Code" agent)
+4. No attribution % shown
+5. Title shows prompt excerpt instead of git commit message
+
+---
+
+## Changes
+
+### 1. Git reader: commit correlation + diff stats — `pkg/git/reader.go`
+
+Add a `CommitInfo` struct and two methods:
+
+```go
+type CommitInfo struct {
+    Hash    string
+    Subject string
+    Author  string
+}
+
+func (r *Reader) FindCommitBefore(branch string, before time.Time) (CommitInfo, error)
+```
+Runs `git log <branch> --format=%H%x09%s%x09%an -1 --before=<RFC3339>`. Parses tab-separated output into `CommitInfo`. Uses `%x09` (tab) as separator to avoid issues with spaces in subjects/names.
+
+```go
+func (r *Reader) DiffStats(hash string) (adds, dels int, err error)
+```
+Runs `git diff --numstat <hash>~1 <hash>`. Sums up additions and deletions across all files. Returns `0, 0, nil` if the commit has no parent (initial commit).
+
+### 2. Add fields to CheckpointSummary — `pkg/checkpoint/types.go`
+
+Add to `CheckpointSummary`:
+- `CommitHash string` — the correlated master commit hash
+- `Author string` — git commit author (engineer name)
+
+(Fields `CommitMessage`, `AgentPercent`, `Additions`, `Deletions` already exist)
+
+### 3. Load commit info in loader — `pkg/checkpoint/loader.go`
+
+In `loadSummary()`, after parsing session metadata and getting `createdAt`:
+
+```go
+if !summary.CreatedAt.IsZero() {
+    info, err := l.reader.FindCommitBefore(meta.Branch, summary.CreatedAt.Add(10*time.Second))
+    if err == nil {
+        summary.CommitMessage = info.Subject
+        summary.CommitHash = info.Hash
+        summary.Author = info.Author
+        adds, dels, err := l.reader.DiffStats(info.Hash)
+        if err == nil {
+            summary.Additions = adds
+            summary.Deletions = dels
+        }
+    }
+}
+```
+
+Uses `meta.Branch` (not hardcoded "master"). Adds 10s buffer to `created_at` to ensure we find the commit. All errors handled gracefully — if correlation fails, fields stay empty/zero and the UI falls back to prompt excerpts.
+
+### 4. Rewrite meta line with fixed columns + new data — `pkg/ui/dashboard/checkpoint_list.go`
+
+**Left side** (unchanged): `hash · time · Author (Agent NN%)`
+- Show `s.Author` instead of just agent name
+- Append attribution: `"Jaime (Claude Code 100%)"` or just `"Claude Code 100%"` if no author
+
+**Right side** with fixed-width columns using `lipgloss.NewStyle().Width(N).Align(Right)`:
+```
+  +192 / -0     6 files   3 sessions   47.2k tokens
+```
+
+Each column gets a fixed width:
+- Diff: `Width(14)` — e.g. `+192 / -0`
+- Files: `Width(10)` — e.g. `6 files`
+- Sessions: `Width(12)` — e.g. `3 sessions`
+- Tokens: `Width(14)` — e.g. `47.2k tokens`
+
+Columns are right-aligned within their fixed width and separated by dim `·`.
+
+If additions+deletions are both 0 (no commit correlated), skip the diff column but keep the width placeholder to maintain alignment.
+
+### 5. Title uses commit message — already implemented
+
+`renderCheckpointBlock` already uses `s.CommitMessage` as first choice for title, falling back to cleaned prompt. This will now work since `loadSummary` populates it.
+
+---
+
+## Files Modified
+
+1. **`pkg/git/reader.go`** — add `CommitInfo`, `FindCommitBefore()`, `DiffStats()`
+2. **`pkg/checkpoint/types.go`** — add `CommitHash`, `Author` to `CheckpointSummary`
+3. **`pkg/checkpoint/loader.go`** — correlate checkpoint → master commit, load diff stats
+4. **`pkg/ui/dashboard/checkpoint_list.go`** — fixed-width columns, author+attribution, +/- in color
+
+## Verification
+
+- `make build` compiles
+- `make test` passes
+- Run `./entire-local` in repo with entire.io data
+- Verify: commit message shows as title (e.g. "UI Improvements Round #02")
+- Verify: author name appears (e.g. "Jaime")
+- Verify: attribution % shown (e.g. "100%")
+- Verify: +N / -N in green/red on right side
+- Verify: right-side columns are aligned across rows
+- Verify: selection, scrolling, filtering still work
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/arvos/.claude/projects/-Users-arvos-Tactic-workspaces-workspace-entire-local-cli-entire-local/0e818656-46dd-4357-83f8-afce5b4edc6f.jsonl
