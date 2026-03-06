@@ -1,0 +1,1420 @@
+Implement the following plan:
+
+# Plan: Fix scrolling in detail view tabs
+
+## Context
+After adding full diff rendering to the Files tab, j/k scrolling doesn't work. Root cause: `m.maxScroll` (the model struct field) is **never written to** — it stays 0. The Down handler in `handleDetailKeys` (`dashboard.go:203`) gates on `m.scrollOffset < m.maxScroll`, so scrollOffset can never increase past 0.
+
+The View functions compute a local `maxScroll` variable for clamping display, but that never flows back to the struct field (View is a value receiver).
+
+## Change
+
+### `pkg/ui/dashboard/dashboard.go`
+
+1. **Remove `maxScroll int` field** from the model struct (line 31) — it's never set and misleading.
+
+2. **Add `contentLineEstimate()` method** on model that returns a rough upper-bound line count for the active tab:
+   - `tabFiles`: `strings.Count(m.detail.Diff, "\n") + len(parseDiffStats(m.detail.Diff).files) + 10`
+   - `tabPlan`: `strings.Count(m.detail.Plan, "\n") + 10`
+   - `tabTranscript`: `len(m.transcript) * 5`
+
+3. **Update Down handler** in `handleDetailKeys` (line 202-206): replace `m.maxScroll` with `m.contentLineEstimate()`.
+
+The estimate is intentionally generous — the View already clamps `scrollOffset` to the precise max during rendering. The estimate just prevents unbounded growth.
+
+## Verification
+- `make build && make test`
+- Run TUI, enter a checkpoint with a long diff, verify j/k scrolling works on Files, Transcript, and Plan tabs
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/arvos/.claude/projects/-Users-arvos-Tactic-workspaces-workspace-entire-local-cli-entire-local/38a313c5-5d9a-4ce6-901f-f426725b2db0.jsonl
+
+---
+
+Base directory for this skill: /Users/arvos/.claude/skills/go-style
+
+# Go Style & Idioms
+
+Review Go code for style and idioms based on the official [Go Code Review Comments](https://go.dev/wiki/CodeReviewComments) wiki.
+
+## Note on Project-Specific Conventions
+
+This skill covers **general Go idioms and standard practices**. Some projects use different conventions:
+- For DDD architecture patterns, see `go-review-ddd` skill
+- For repository-specific patterns, see `go-repository` skill
+- Some projects use pointer-first approaches that differ from standard Go guidance
+
+---
+
+## 1. Formatting & Documentation
+
+### gofmt
+
+**All Go code must be formatted with gofmt.**
+
+#### Review Checklist
+
+- **Issue** if code is not gofmt-formatted (indentation, spacing)
+- **Issue** if imports are not grouped and sorted
+
+```go
+// Issue: manual formatting
+func main(){
+	fmt.Println( "hello" )
+}
+
+// Correct: gofmt-formatted
+func main() {
+	fmt.Println("hello")
+}
+```
+
+### Comment Sentences
+
+**Doc comments should be complete sentences.**
+
+#### Review Checklist
+
+- **Issue** if comments don't start with the name of the element being described
+- **Issue** if comments don't end with a period
+- **Issue** if exported names lack doc comments
+
+```go
+// Issue: incomplete comment
+// returns the user name
+func GetName() string { ... }
+
+// Correct: complete sentence starting with function name
+// GetName returns the user's full name.
+func GetName() string { ... }
+```
+
+### Doc Comments
+
+**Every exported name should have a doc comment.**
+
+#### Review Checklist
+
+- **Issue** if exported functions, types, constants, or variables lack doc comments
+- **Issue** if doc comments don't start with the declared name
+- **OK** for unexported names to have comments but not required
+
+```go
+// Issue: no doc comment on exported function
+func ProcessUser(user *User) error { ... }
+
+// Correct: doc comment starting with function name
+// ProcessUser validates and stores the user in the database.
+// It returns an error if validation fails.
+func ProcessUser(user *User) error { ... }
+```
+
+```go
+// Issue: doc comment doesn't start with type name
+// This represents a user
+type User struct { ... }
+
+// Correct: starts with type name
+// User represents an authenticated user in the system.
+type User struct { ... }
+```
+
+### Mixed Caps
+
+**Use MixedCaps or mixedCaps for multi-word names, not underscores.**
+
+#### Review Checklist
+
+- **Issue** if names use underscores (e.g., `user_count`)
+- **Issue** if exported names use wrong casing
+- **OK** for test names to use underscores
+
+```go
+// Issue: underscores
+var user_count int
+func get_user_by_id() { ... }
+
+// Correct: MixedCaps
+var userCount int
+func GetUserByID() { ... }  // Note: ID not Id
+```
+
+### Package Comments
+
+**Every package should have a package comment.**
+
+#### Review Checklist
+
+- **Issue** if package lacks a package comment
+- **Issue** if package comment has blank line between comment and `package` clause
+- **Issue** if `package main` comment doesn't describe the binary
+- **OK** for one file in multi-file package to have the comment
+
+```go
+// Issue: no package comment
+package user
+
+// Issue: blank line between comment and package
+// Package user provides user management functionality.
+
+package user
+
+// Correct: package comment adjacent to package clause
+// Package user provides user management functionality.
+package user
+```
+
+For `package main`, use a binary description:
+
+```go
+// Issue: generic comment
+// Package main is the entry point.
+package main
+
+// Correct: describes what the binary does
+// Binary server runs the HTTP API server for user management.
+package main
+
+// Also acceptable prefixes: Command, Program
+// Command mycli provides a CLI for managing users.
+package main
+```
+
+### Line Length
+
+**No rigid limit, but avoid uncomfortably long lines.**
+
+#### Review Checklist
+
+- **Issue** if lines are so long they require horizontal scrolling
+- **Issue** if long lines are broken arbitrarily rather than semantically
+- **OK** for long string literals or generated code
+- **OK** to break lines at natural semantic boundaries
+
+```go
+// Issue: arbitrarily broken
+result := someFunction(ctx, userID,
+    email, name, createdAt, updatedAt)
+
+// Correct: break at semantic boundaries
+result := someFunction(
+    ctx,
+    userID,
+    email,
+    name,
+    createdAt,
+    updatedAt,
+)
+
+// Also correct: keep short calls on one line
+result := someFunction(ctx, userID)
+```
+
+**Guidelines:**
+- Break lines for readability, not to hit a character limit
+- Use shorter variable names if it helps
+- Reduce nesting or extract helper functions for complex logic
+
+---
+
+## 2. Error Handling Idioms
+
+### Error Strings
+
+**Error strings should not be capitalized or end with punctuation.**
+
+#### Review Checklist
+
+- **Issue** if error strings start with capital letter
+- **Issue** if error strings end with punctuation (. ! ?)
+- **OK** for proper nouns or acronyms to be capitalized
+
+```go
+// Issue: capitalized, punctuation
+errors.New("Failed to connect to database.")
+fmt.Errorf("Invalid user ID!")
+
+// Correct: lowercase, no punctuation
+errors.New("failed to connect to database")
+fmt.Errorf("invalid user ID")
+
+// OK: proper noun
+errors.New("failed to connect to PostgreSQL")
+```
+
+### Handle Errors
+
+**Don't discard errors using `_`.**
+
+#### Review Checklist
+
+- **Issue** if errors are explicitly discarded with `_ = someFunc()`
+- **Issue** if errors are ignored without comment
+- **OK** if there's a comment explaining why error is ignored
+
+```go
+// Issue: discarding error
+_ = file.Close()
+
+// Issue: not handling error
+someFunc()
+
+// Correct: handle error
+if err := file.Close(); err != nil {
+    return fmt.Errorf("failed to close file: %w", err)
+}
+
+// OK: rare case with comment
+_ = file.Close() // closing read-only file, error not relevant
+```
+
+### Indent Error Flow
+
+**Handle errors first, then normal code.**
+
+#### Review Checklist
+
+- **Issue** if happy path is indented and error handling is in else clause
+- **Issue** if error checks don't use early returns
+
+```go
+// Issue: happy path indented
+func doSomething() error {
+    if err := step1(); err == nil {
+        if err := step2(); err == nil {
+            return step3()
+        } else {
+            return err
+        }
+    } else {
+        return err
+    }
+}
+
+// Correct: error flow handling with early returns
+func doSomething() error {
+    if err := step1(); err != nil {
+        return err
+    }
+    if err := step2(); err != nil {
+        return err
+    }
+    return step3()
+}
+```
+
+### Don't Panic
+
+**Don't use panic for normal error handling.**
+
+#### Review Checklist
+
+- **Issue** if panic is used for expected errors
+- **Issue** if panic is used in library code
+- **OK** for panic in init() or truly unrecoverable situations
+
+```go
+// Issue: panic for expected error
+func GetUser(id string) *User {
+    user, err := db.Find(id)
+    if err != nil {
+        panic(err)  // Wrong!
+    }
+    return user
+}
+
+// Correct: return error
+func GetUser(id string) (*User, error) {
+    user, err := db.Find(id)
+    if err != nil {
+        return nil, fmt.Errorf("failed to get user: %w", err)
+    }
+    return user, nil
+}
+```
+
+### In-Band Errors
+
+**Avoid in-band error values (special return values indicating errors).**
+
+#### Review Checklist
+
+- **Issue** if functions return -1, 0, nil, or empty string to indicate errors
+- **Issue** if callers must remember special error values
+
+```go
+// Issue: in-band error (-1 means error)
+func GetAge() int {
+    if err := loadUser(); err != nil {
+        return -1  // Caller must check for -1
+    }
+    return user.Age
+}
+
+// Correct: explicit error return
+func GetAge() (int, error) {
+    if err := loadUser(); err != nil {
+        return 0, fmt.Errorf("failed to load user: %w", err)
+    }
+    return user.Age, nil
+}
+```
+
+---
+
+## 3. Code Organization
+
+### Import Grouping
+
+**Group imports into standard library, third-party, and local imports.**
+
+#### Review Checklist
+
+- **Issue** if imports are not grouped
+- **Issue** if groups are not separated by blank lines
+- **Issue** if imports within groups are not sorted
+
+```go
+// Issue: not grouped
+import (
+    "fmt"
+    "github.com/gin-gonic/gin"
+    "context"
+    "myapp/internal/domain"
+    "strings"
+)
+
+// Correct: grouped and sorted
+import (
+    "context"
+    "fmt"
+    "strings"
+
+    "github.com/gin-gonic/gin"
+
+    "myapp/internal/domain"
+)
+```
+
+### Import Blank
+
+**Use blank imports (`import _ "pkg"`) only for side effects.**
+
+#### Review Checklist
+
+- **Issue** if blank import used in library code (not main or tests)
+- **Issue** if blank import purpose is not documented with comment
+- **OK** for blank imports in `main` package or test files
+- **OK** for database drivers, image format registration, etc.
+
+```go
+// Issue: blank import in library without explanation
+import _ "github.com/lib/pq"
+
+// Correct: blank import with comment explaining why
+import (
+    "database/sql"
+
+    _ "github.com/lib/pq" // PostgreSQL driver registration
+)
+
+// Correct: in main.go for side effects
+package main
+
+import (
+    _ "image/png" // Register PNG format
+    _ "image/jpeg" // Register JPEG format
+)
+```
+
+### Import Dot
+
+**Avoid dot imports (`import . "pkg"`) in production code.**
+
+#### Review Checklist
+
+- **Issue** if dot import used outside of test files
+- **Issue** if dot import used when not required for circular dependency
+- **OK** for dot imports in `_test.go` files to break circular dependencies
+- **OK** sparingly in tests for readability (e.g., DSL packages)
+
+```go
+// Issue: dot import in production code
+import . "github.com/onsi/gomega"
+
+func Process() {
+    Expect(result).To(BeTrue())  // Where does Expect come from?
+}
+
+// Correct: explicit import
+import "github.com/onsi/gomega"
+
+func Process() {
+    gomega.Expect(result).To(gomega.BeTrue())
+}
+
+// OK: dot import in test file for readability
+// foo_test.go
+package foo_test
+
+import (
+    . "myapp/foo"  // Testing package foo from external test
+)
+```
+
+---
+
+## 4. Interfaces
+
+### Define Interfaces Where Used
+
+**Define interfaces in the package that uses them, not in the package that implements them.**
+
+#### Review Checklist
+
+- **Issue** if package exports interfaces for its own concrete types
+- **Issue** if interfaces are defined in "interfaces.go" alongside implementations
+- **Issue** if interfaces have many methods (prefer small interfaces)
+- **OK** for well-known interfaces like `io.Reader`, `io.Writer`
+
+```go
+// Issue: interface defined with implementation
+// storage/storage.go
+package storage
+
+type Storage interface {  // Don't define here!
+    Get(key string) ([]byte, error)
+    Set(key string, value []byte) error
+}
+
+type RedisStorage struct { ... }
+func (r *RedisStorage) Get(key string) ([]byte, error) { ... }
+func (r *RedisStorage) Set(key string, value []byte) error { ... }
+
+// Correct: interface defined where it's used
+// cache/cache.go
+package cache
+
+// Storage is the interface for cache backends.
+type Storage interface {
+    Get(key string) ([]byte, error)
+    Set(key string, value []byte) error
+}
+
+type Cache struct {
+    storage Storage  // Accept interface
+}
+
+func New(s Storage) *Cache {
+    return &Cache{storage: s}
+}
+```
+
+### Keep Interfaces Small
+
+**Prefer small interfaces with 1-3 methods.**
+
+#### Review Checklist
+
+- **Issue** if interface has more than 5 methods
+- **Issue** if you're creating interfaces just for mocking
+- **OK** to compose small interfaces into larger ones when needed
+
+```go
+// Issue: large interface
+type UserService interface {
+    Create(ctx context.Context, user *User) error
+    Get(ctx context.Context, id string) (*User, error)
+    Update(ctx context.Context, user *User) error
+    Delete(ctx context.Context, id string) error
+    List(ctx context.Context) ([]*User, error)
+    Search(ctx context.Context, query string) ([]*User, error)
+    // ... 10 more methods
+}
+
+// Correct: small, focused interfaces
+type UserReader interface {
+    Get(ctx context.Context, id string) (*User, error)
+}
+
+type UserWriter interface {
+    Create(ctx context.Context, user *User) error
+    Update(ctx context.Context, user *User) error
+}
+
+// Compose when needed
+type UserReadWriter interface {
+    UserReader
+    UserWriter
+}
+```
+
+### Don't Export Interfaces for Mocking
+
+**Design APIs that are testable without mocking interfaces.**
+
+#### Review Checklist
+
+- **Issue** if interfaces exist solely for testing/mocking
+- **Issue** if production code only has one implementation of an interface
+- **OK** for interfaces with multiple real implementations
+
+```go
+// Issue: interface just for mocking
+type TimeProvider interface {
+    Now() time.Time
+}
+
+type realTime struct{}
+func (realTime) Now() time.Time { return time.Now() }
+
+// Correct: accept a function or use dependency injection
+type Service struct {
+    now func() time.Time
+}
+
+func New() *Service {
+    return &Service{now: time.Now}
+}
+
+// In tests:
+svc := &Service{now: func() time.Time { return fixedTime }}
+```
+
+---
+
+## 5. Functions & Methods
+
+### Named Result Parameters
+
+**Use named results sparingly, only when they improve clarity.**
+
+#### Review Checklist
+
+- **Issue** if named results are used just to enable naked returns
+- **Issue** if named results don't improve documentation
+- **OK** for named results in defer-heavy functions or long functions
+
+```go
+// Issue: named result just for naked return
+func GetUser(id string) (user *User, err error) {
+    user, err = db.Find(id)
+    return  // Naked return obscures what's being returned
+}
+
+// Correct: explicit return
+func GetUser(id string) (*User, error) {
+    user, err := db.Find(id)
+    return user, err
+}
+
+// OK: named results for documentation in complex function
+func Divide(dividend, divisor float64) (quotient, remainder float64, err error) {
+    if divisor == 0 {
+        return 0, 0, errors.New("division by zero")
+    }
+    quotient = dividend / divisor
+    remainder = math.Mod(dividend, divisor)
+    return quotient, remainder, nil
+}
+```
+
+### Naked Returns
+
+**Avoid naked returns except in very short functions.**
+
+#### Review Checklist
+
+- **Issue** if naked returns used in functions longer than 5-10 lines
+- **Issue** if naked return makes it unclear what's being returned
+
+```go
+// Issue: naked return in long function
+func Process(data string) (result string, err error) {
+    // ... 50 lines of code ...
+    return  // What values are being returned?
+}
+
+// Correct: explicit return
+func Process(data string) (string, error) {
+    // ... processing ...
+    return result, err
+}
+```
+
+### Receiver Names
+
+**Use short, consistent receiver names (1-2 letters).**
+
+#### Review Checklist
+
+- **Issue** if receiver name is "this" or "self"
+- **Issue** if receiver name is overly long
+- **Issue** if receiver names are inconsistent across methods of same type
+- **Issue** if receiver name shadows package or type name
+
+```go
+// Issue: "this" or "self"
+func (this User) GetName() string { ... }
+func (self User) GetEmail() string { ... }
+
+// Issue: inconsistent names
+func (u User) GetName() string { ... }
+func (user User) GetEmail() string { ... }
+
+// Correct: short, consistent
+func (u *User) GetName() string { ... }
+func (u *User) GetEmail() string { ... }
+```
+
+### Receiver Type
+
+**Use pointer receivers unless you have a good reason not to.**
+
+#### Review Checklist
+
+- **Issue** if methods on same type have inconsistent receiver types (some pointer, some value)
+- **OK** for small immutable structs to use value receivers
+- **OK** for value receivers on methods that don't modify receiver
+
+**Note**: Some projects use pointer-first conventions. This guidance is for general Go code.
+
+```go
+// Issue: inconsistent receiver types
+func (u *User) SetName(name string) { u.Name = name }  // Pointer
+func (u User) GetName() string { return u.Name }       // Value - inconsistent!
+
+// Correct: consistent pointer receivers
+func (u *User) SetName(name string) { u.Name = name }
+func (u *User) GetName() string { return u.Name }
+
+// OK: small immutable type with value receivers
+type Point struct{ X, Y int }
+func (p Point) Add(q Point) Point { return Point{p.X + q.X, p.Y + q.Y} }
+```
+
+### Context as First Parameter
+
+**Context should be the first parameter in functions.**
+
+#### Review Checklist
+
+- **Issue** if context is not the first parameter
+- **Issue** if context is stored in a struct (use parameter instead)
+
+```go
+// Issue: context not first
+func GetUser(id string, ctx context.Context) (*User, error) { ... }
+
+// Correct: context first
+func GetUser(ctx context.Context, id string) (*User, error) { ... }
+```
+
+---
+
+## 6. Concurrency
+
+### Goroutine Lifetimes
+
+**Document goroutine lifetimes, especially in concurrent code.**
+
+#### Review Checklist
+
+- **Issue** if goroutines are launched without clear termination
+- **Issue** if no comment explains when goroutine exits
+- **Issue** if goroutine might leak
+
+```go
+// Issue: unclear goroutine lifetime
+func StartProcessor() {
+    go process()  // When does this stop?
+}
+
+// Correct: documented lifetime and cleanup
+// StartProcessor launches a background goroutine that processes
+// items until ctx is canceled.
+func StartProcessor(ctx context.Context) {
+    go func() {
+        for {
+            select {
+            case <-ctx.Done():
+                return  // Goroutine exits when context canceled
+            case item := <-queue:
+                process(item)
+            }
+        }
+    }()
+}
+```
+
+### Synchronous Functions
+
+**Prefer synchronous functions; let caller decide on concurrency.**
+
+#### Review Checklist
+
+- **Issue** if function launches goroutine internally without clear need
+- **OK** for goroutines in long-running services or servers
+
+```go
+// Issue: forces async on caller
+func ProcessData(data []byte) {
+    go func() {
+        // process data
+    }()
+}
+
+// Correct: synchronous, caller controls concurrency
+func ProcessData(data []byte) error {
+    // process data synchronously
+    return nil
+}
+
+// Caller can make it async if needed:
+go func() {
+    if err := ProcessData(data); err != nil {
+        log.Println(err)
+    }
+}()
+```
+
+---
+
+## 7. Memory & Performance
+
+### Pass Values vs Pointers
+
+**For small structs, consider passing by value.**
+
+#### Review Checklist
+
+- **Issue** if large structs (many fields) passed by value
+- **OK** for small structs (2-3 primitive fields) to be passed by value
+- **OK** for time.Time, bytes.Buffer to be passed by value
+
+**Note**: Some projects use pointer-first approaches. This is standard Go guidance for optimal performance.
+
+```go
+// Small immutable struct - value is fine
+type Point struct {
+    X, Y int
+}
+
+func Distance(p1, p2 Point) float64 {
+    dx := p1.X - p2.X
+    dy := p1.Y - p2.Y
+    return math.Sqrt(float64(dx*dx + dy*dy))
+}
+
+// Large struct or mutable - use pointer
+type User struct {
+    ID        string
+    Email     string
+    Name      string
+    CreatedAt time.Time
+    // ... many more fields
+}
+
+func UpdateUser(u *User) error { ... }
+```
+
+### Copying
+
+**Be careful when copying structs to avoid unexpected aliasing.**
+
+#### Review Checklist
+
+- **Issue** if copying a struct whose methods use pointer receivers
+- **Issue** if copying a struct containing a mutex, channel, or other sync primitives
+- **Issue** if copying causes unintended sharing of pointer fields
+- **OK** for small value types designed to be copied
+
+```go
+// Issue: copying struct with pointer receiver methods
+type Counter struct {
+    count int
+}
+
+func (c *Counter) Increment() { c.count++ }
+func (c *Counter) Value() int { return c.count }
+
+func main() {
+    c1 := Counter{}
+    c2 := c1           // Copied! c2 is independent
+    c1.Increment()
+    fmt.Println(c2.Value())  // Prints 0, not 1 - may be unexpected
+}
+
+// Issue: copying struct with mutex
+type SafeMap struct {
+    mu sync.Mutex
+    m  map[string]int
+}
+
+func main() {
+    sm1 := SafeMap{m: make(map[string]int)}
+    sm2 := sm1  // BUG: mutex copied, map shared!
+}
+
+// Issue: copying struct with pointer field causes aliasing
+type User struct {
+    Name    string
+    Friends []*User  // Pointer slice
+}
+
+func main() {
+    u1 := User{Name: "Alice", Friends: []*User{...}}
+    u2 := u1  // u2.Friends points to same slice!
+    u2.Friends[0].Name = "Bob"  // Modifies u1's friend too!
+}
+
+// Correct: if you need to copy, implement Clone()
+func (u *User) Clone() *User {
+    clone := *u
+    clone.Friends = make([]*User, len(u.Friends))
+    copy(clone.Friends, u.Friends)
+    return &clone
+}
+```
+
+**Rule of thumb**: If a type's methods have pointer receivers, don't copy values of that type.
+
+### Declaring Empty Slices
+
+**Use `var s []T` for empty slices, not `s := []T{}`.**
+
+#### Review Checklist
+
+- **Issue** if empty slice declared with `make([]T, 0)` or `[]T{}`
+- **OK** for `var s []T` (nil slice)
+
+```go
+// Issue: unnecessary allocation
+s := []string{}
+s := make([]string, 0)
+
+// Correct: nil slice (preferred)
+var s []string
+
+// Also OK when size is known
+s := make([]string, 0, 10)  // Preallocate capacity
+```
+
+**Note**: `nil` slices and empty slices behave identically for append, len, and range.
+
+---
+
+## 8. Security & Testing
+
+### Crypto Rand
+
+**Use crypto/rand for keys and secrets, not math/rand.**
+
+#### Review Checklist
+
+- **Issue** if math/rand used for cryptographic purposes
+- **Issue** if math/rand used for tokens, session IDs, or keys
+
+```go
+// Issue: insecure for tokens
+import "math/rand"
+token := rand.Int63()
+
+// Correct: crypto/rand for security
+import "crypto/rand"
+b := make([]byte, 32)
+if _, err := rand.Read(b); err != nil {
+    return err
+}
+token := base64.URLEncoding.EncodeToString(b)
+```
+
+### Examples
+
+**Use testable examples in _test.go files.**
+
+#### Review Checklist
+
+- **Issue** if examples don't follow `Example*` naming convention
+- **Issue** if examples lack `// Output:` comment
+- **OK** for examples without output if they demonstrate usage
+
+```go
+// Correct: testable example
+func ExampleUser_GetFullName() {
+    u := &User{FirstName: "John", LastName: "Doe"}
+    fmt.Println(u.GetFullName())
+    // Output: John Doe
+}
+```
+
+### Useful Test Failures
+
+**Test failures should clearly indicate what went wrong.**
+
+#### Review Checklist
+
+- **Issue** if test errors lack context (which test, what input, what expected)
+- **Issue** if using `t.Fatal` when `t.Error` would suffice
+
+```go
+// Issue: uninformative failure
+if got != want {
+    t.Fatal("wrong result")
+}
+
+// Correct: clear failure message
+if got != want {
+    t.Errorf("GetName(%q) = %q; want %q", input, got, want)
+}
+```
+
+---
+
+## 9. Naming Conventions
+
+### Initialisms
+
+**Use correct casing for initialisms (URL, ID, HTTP, etc.).**
+
+#### Review Checklist
+
+- **Issue** if initialisms use wrong casing: `Url`, `Id`, `Http`, `Json`
+- **Correct**: `URL`, `ID`, `HTTP`, `JSON` (all caps or all lowercase)
+
+```go
+// Issue: wrong casing
+type User struct {
+    UserId   string
+    ImageUrl string
+    HttpCode int
+}
+
+// Correct: proper initialisms
+type User struct {
+    UserID   string  // ID not Id
+    ImageURL string  // URL not Url
+    HTTPCode int     // HTTP not Http
+}
+
+// Also correct when not exported
+userID := "123"
+imageURL := "https://..."
+```
+
+### Common Initialisms
+
+| Wrong | Correct |
+|-------|---------|
+| `Id` | `ID` |
+| `Url` | `URL` |
+| `Http` | `HTTP` |
+| `Json` | `JSON` |
+| `Xml` | `XML` |
+| `Html` | `HTML` |
+| `Api` | `API` |
+| `Db` | `DB` |
+| `Sql` | `SQL` |
+| `Ui` | `UI` |
+
+### Package Names
+
+**Package names should be short, lowercase, no underscores or mixedCaps.**
+
+#### Review Checklist
+
+- **Issue** if package names use underscores or mixed caps
+- **Issue** if package name is plural (prefer singular)
+- **Issue** if package name is overly long
+
+```go
+// Issue: wrong package names
+package user_service
+package UserService
+package users
+
+// Correct: short, lowercase, singular
+package user
+package service
+package http
+```
+
+### Variable Names
+
+**Use short names for short scope, descriptive names for longer scope.**
+
+#### Review Checklist
+
+- **Issue** if loop variables use long names (`index`, `element`)
+- **Issue** if package-level variables use single-letter names
+- **OK** for `i`, `j`, `k` in loops
+- **OK** for short receiver names
+
+```go
+// Issue: overly verbose loop vars
+for index, element := range items {
+    fmt.Println(index, element)
+}
+
+// Correct: short names for short scope
+for i, item := range items {
+    fmt.Println(i, item)
+}
+
+// Issue: single letter for package var
+var u *User  // Package level - too short
+
+// Correct: descriptive for longer scope
+var DefaultUser *User
+```
+
+---
+
+## Output Format
+
+When reviewing Go code, report findings as:
+
+```
+**Go Style Review**
+
+Issues found:
+- `user.go:12` - Function `GetUser` missing doc comment
+- `user.go:23` - Error string "Failed to connect" should be lowercase: "failed to connect"
+- `user.go:45` - Receiver name "this" should be short (e.g., "u")
+- `user.go:67` - Initialism "UserId" should be "UserID"
+- `auth.go:34` - Imports not grouped (stdlib, third-party, local)
+- `handler.go:89` - Error discarded with `_ = file.Close()` without comment
+
+Recommendations:
+- Add doc comments to all exported functions
+- Use consistent receiver names across User methods
+- Group imports: stdlib, third-party, then local
+
+No issues:
+- All code is gofmt-formatted
+- Error handling uses early returns
+- Context passed as first parameter
+```
+
+---
+
+## When to Run
+
+This skill auto-invokes when reviewing all Go files (`.go` extension).
+
+For more focused reviews:
+- **DDD architecture**: Use `go-review-ddd` skill
+- **Repository patterns**: Use `go-repository` skill
+- **Gin framework**: Use `gin-go` skill
+
+---
+
+Base directory for this skill: /Users/arvos/.claude/skills/go-review-ddd
+
+# Go DDD Architecture Review
+
+Comprehensive review of Go code for pointer semantics, test coverage, and best practices.
+
+## Note: Opinionated Project Conventions
+
+This skill enforces **opinionated conventions** for DDD-based Go projects:
+- **Pointer-first semantics**: Uses `*T` for all model/entity types
+- **Specific directory structure**: `internal/app/`, `internal/infra/` layout
+- **One-file-per-method**: Service methods in separate files
+
+Standard Go guidance may differ (see `go-style` skill). These are project-specific conventions prioritizing consistency and architectural clarity over micro-optimization.
+
+## 1. Pointer Semantics
+
+Review Go code for correct pointer and value semantics using the "pointer-first" approach.
+
+## Core Principles
+
+1. **Pointer-first for structs**: Use `*T` for all model/entity types by default
+2. **Value semantics for primitives**: Keep `string`, `int`, `bool`, etc. as values
+3. **Small struct exception**: Structs with 2-3 primitive fields only may use value semantics
+4. **Consistency over micro-optimization**: Reducing mental overhead trumps minor performance gains
+
+## Review Checklist
+
+When reviewing Go code, check and flag issues for:
+
+### Function Parameters
+- **Issue** if struct parameters use `T` instead of `*T`
+- **OK** for primitive types as values
+- **OK** for small structs (2-3 primitive fields only)
+
+```go
+// Issue: should use pointer
+func ProcessUser(user User) { ... }
+
+// Correct
+func ProcessUser(user *User) { ... }
+```
+
+### Slice Types
+- **Issue** if slices of structs use `[]T` instead of `[]*T`
+
+```go
+// Issue: should use pointer slice
+func GetUsers() []User { ... }
+
+// Correct
+func GetUsers() []*User { ... }
+```
+
+### Method Receivers
+- **Issue** if struct methods use value receivers for anything other than read-only operations on small structs
+
+```go
+// Issue: should use pointer receiver
+func (u User) UpdateName(name string) { ... }
+
+// Correct
+func (u *User) UpdateName(name string) { ... }
+```
+
+### Factory Functions
+- **Issue** if factory functions return `T` instead of `*T`
+
+```go
+// Issue: should return pointer
+func NewUser(name string) User { ... }
+
+// Correct
+func NewUser(name string) *User { ... }
+```
+
+## Output Format
+
+When reviewing, report findings as:
+
+```
+**Go Pointer Review**
+
+Issues found:
+- `file.go:42` - `ProcessUser(user User)` should use `*User`
+- `file.go:58` - `[]User` should be `[]*User`
+
+No issues:
+- Factory functions correctly return pointers
+- Method receivers use pointer semantics
+```
+
+## 2. Test Suite Coverage
+
+When reviewing files in `handlers/`, `services/`, or `repositories/` directories, check for test coverage.
+
+### Review Checklist
+
+1. **Check if `_test.go` file exists** for the file being reviewed
+2. **If missing**, flag it and offer to create test scaffolding
+3. **If exists**, check for basic coverage of exported functions
+
+### What to Check
+
+- Does a corresponding `_test.go` file exist?
+- Are exported functions covered by at least one test?
+- Are error cases tested?
+
+### Output Format
+
+```
+**Test Coverage Review**
+
+Missing test file:
+- `handlers/user.go` has no corresponding `handlers/user_test.go`
+
+Missing test coverage:
+- `CreateUser()` has no test coverage
+- `DeleteUser()` error path not tested
+
+Offer: Would you like me to create test scaffolding for the missing tests?
+```
+
+### When Test Review Triggers
+
+This check runs when reviewing:
+- Files in `handlers/` directory
+- Files in `services/` directory
+- Files in `repositories/` directory
+
+---
+
+## 3. Layer Architecture (DDD)
+
+Verify code follows clean architecture layer boundaries.
+
+### Layer Structure
+
+```
+cmd/api/main.go              → Entry point, dependency wiring
+internal/app/aggregates/     → Domain entities
+internal/app/services/       → Domain services (business logic)
+internal/app/usecases/       → Application use cases
+internal/infra/http/handlers/→ HTTP handlers (thin, delegate to services)
+internal/infra/http/server/  → Router configuration
+internal/infra/repositories/ → External service clients
+```
+
+### Review Checklist
+
+- **Issue** if business logic appears in handlers (handlers should be thin)
+- **Issue** if infrastructure concerns leak into `internal/app/`
+- **Issue** if services directly import infrastructure packages
+- **OK** for services to define repository interfaces they depend on
+
+```go
+// Issue: handler contains business logic
+func (h *UserHandler) Create(w http.ResponseWriter, r *http.Request) {
+    // Validation, transformation, orchestration here = wrong
+}
+
+// Correct: handler delegates to service
+func (h *UserHandler) Create(w http.ResponseWriter, r *http.Request) {
+    result, err := h.userService.Create(ctx, req)
+    // Only HTTP concerns: parse request, write response, log errors
+}
+```
+
+---
+
+## 4. Service Structure
+
+Services should follow the one-file-per-method pattern.
+
+### Expected Structure
+
+```
+services/<name>/
+├── service.go           # Service struct, constructor, repository interfaces
+├── <method>.go          # One file per public method
+└── ...
+```
+
+### Review Checklist
+
+- **Issue** if `service.go` contains method implementations beyond constructor
+- **Issue** if multiple public methods are in a single file
+- **OK** for small helper methods to live alongside their public method
+
+```go
+// services/orchestration/service.go - ONLY contains:
+type Service struct { ... }
+type NotionRepository interface { ... }
+func New(...) *Service { ... }
+
+// services/orchestration/process_task.go - Contains:
+func (s *Service) ProcessTask(...) { ... }
+```
+
+---
+
+## 5. Repository Pattern
+
+Repositories are interfaces defined by the service that uses them, not by the implementation.
+
+### Review Checklist
+
+- **Issue** if repository interface is defined in `internal/infra/repositories/`
+- **Issue** if service imports concrete repository types
+- **OK** for interface to be defined in the service's `service.go`
+
+```go
+// Correct: interface in service.go
+// services/llm/service.go
+type Repository interface {
+    Process(ctx context.Context, request *Request) (*Response, error)
+    HealthCheck(ctx context.Context) error
+}
+
+// Issue: interface in repository package
+// infra/repositories/claude/repository.go
+type Repository interface { ... }  // Wrong location!
+```
+
+---
+
+## 6. Error Handling
+
+Errors should be wrapped with context and logged at appropriate levels.
+
+### Review Checklist
+
+- **Issue** if errors are returned without context wrapping
+- **Issue** if errors are logged in services (should log at handler level)
+- **Issue** if using `log.Println` instead of structured logging
+- **OK** for `fmt.Errorf("failed to X: %w", err)` pattern
+
+```go
+// Issue: no context
+return err
+
+// Issue: logging in service
+func (s *Service) Process() error {
+    log.Println("error:", err)  // Wrong!
+    return err
+}
+
+// Correct: wrap with context
+return fmt.Errorf("failed to process task %s: %w", taskID, err)
+
+// Correct: log at handler level with structured logging
+logger.ErrorContext(ctx, "failed to process request", "error", err, "task_id", taskID)
+```
+
+---
+
+## 7. Naming Conventions
+
+Follow consistent naming patterns for types and files.
+
+### Patterns
+
+| Type | File Name | Type Name |
+|------|-----------|-----------|
+| Service | `<domain>/service.go` | `type Service struct` |
+| Repository | `<provider>/repository.go` | `type Repository struct` |
+| Handler | `<name>_handler.go` | `type <Name>Handler struct` |
+
+### Review Checklist
+
+- **Issue** if service type is not named `Service`
+- **Issue** if repository type is not named `Repository`
+- **Issue** if handler files don't end in `_handler.go`
+- **Issue** if handler type doesn't match `<Name>Handler`
+
+```go
+// Issue
+type UserService struct { ... }      // Should be: type Service struct
+type ClaudeRepository struct { ... } // Should be: type Repository struct
+type WebhookController struct { ... }// Should be: type WebhookHandler struct
+
+// Correct
+type Service struct { ... }    // in services/user/service.go
+type Repository struct { ... } // in repositories/claude/repository.go
+type WebhookHandler struct { ... } // in handlers/webhook_handler.go
+```
+
+---
+
+## When to Run
+
+This skill auto-invokes after writing or modifying Go files. It checks:
+- Pointer semantics for struct definitions, functions, methods, and return types
+- Test coverage for handlers, services, and repositories
+- Layer boundaries and DDD compliance
+- Service structure (one file per method)
+- Repository pattern (interfaces in consumers)
+- Error handling patterns
+- Naming conventions
+
+---
+
+please update the readme and claude to reflect the status of the project
+
+---
+
+Please follow the good patterns about maintaining a repository that we did in:
+
+https://github.com/partio-io/claude-agent-sdk-go?tab=readme-ov-file
