@@ -1,0 +1,17 @@
+Implement the following plan:
+
+# Plan: Selected Row Style Fix
+
+## Context
+The selected checkpoint row currently has a thick left border "tab" indicator. User wants to remove that border and use a background color instead.
+
+## Changes — `pkg/ui/dashboard/styles.go`
+
+**`selectedRowStyle`** (line 88): Remove `BorderLeft`, `BorderStyle`, `BorderForeground`. Add `Background(lipgloss.Color("236"))` (dark gray). Set `PaddingLeft(3)` to match `normalRowStyle`.
+
+## Verification
+- `make build`
+- Visual: selected row has subtle dark background, no left border
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/arvos/.claude/projects/-Users-arvos-Tactic-workspaces-workspace-entire-local-cli-entire-local/5c50dc73-4b5e-4aa6-b0fa-e5348efd9356.jsonl
