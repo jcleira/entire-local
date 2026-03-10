@@ -16,6 +16,9 @@ type keyMap struct {
 	Num1     key.Binding
 	Num2     key.Binding
 	Num3     key.Binding
+	Actions  key.Binding
+	Confirm  key.Binding
+	Deny     key.Binding
 }
 
 var keys = keyMap{
@@ -70,5 +73,17 @@ var keys = keyMap{
 	Num3: key.NewBinding(
 		key.WithKeys("3"),
 		key.WithHelp("3", "plan tab"),
+	),
+	Actions: key.NewBinding(
+		key.WithKeys("a"),
+		key.WithHelp("a", "actions"),
+	),
+	Confirm: key.NewBinding(
+		key.WithKeys("y"),
+		key.WithHelp("y", "confirm"),
+	),
+	Deny: key.NewBinding(
+		key.WithKeys("n"),
+		key.WithHelp("n", "deny"),
 	),
 }

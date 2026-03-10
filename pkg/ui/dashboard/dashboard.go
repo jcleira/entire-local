@@ -29,6 +29,14 @@ type model struct {
 	err          error
 	detailTab    detailTab
 	scrollOffset int
+
+	showActions         bool
+	actionCursor        int
+	entireCLIAvailable  bool
+	confirmAction       *actionItem
+	commandOutput       string
+	commandOutputScroll int
+	showCommandOutput   bool
 }
 
 func (m model) contentLineEstimate() int {
@@ -61,7 +69,7 @@ func RunDashboard(loader *checkpoint.Loader) error {
 }
 
 func (m model) Init() tea.Cmd {
-	return m.loadCheckpoints()
+	return tea.Batch(m.loadCheckpoints(), detectEntireCLI())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -72,10 +80,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.showCommandOutput {
+			return m.handleCommandOutputKeys(msg)
+		}
+		if m.confirmAction != nil {
+			return m.handleConfirmKeys(msg)
+		}
+		if m.showActions {
+			return m.handleActionKeys(msg)
+		}
 		if m.filtering {
 			return m.handleFilterInput(msg)
 		}
 		return m.handleKeyPress(msg)
+
+	case entireCLIDetectedMsg:
+		m.entireCLIAvailable = msg.available
+		return m, nil
+
+	case entireCmdOutputMsg:
+		m.commandOutput = msg.output
+		m.commandOutputScroll = 0
+		m.showCommandOutput = true
+		m.showActions = false
+		return m, nil
+
+	case entireCmdFinishedMsg:
+		m.showActions = false
+		m.confirmAction = nil
+		return m, m.loadCheckpoints()
 
 	case checkpointsLoadedMsg:
 		m.summaries = msg.summaries
@@ -99,6 +132,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
+	if m.showCommandOutput {
+		return renderCommandOutput(m.commandOutput, m.commandOutputScroll, m.width, m.height)
+	}
+
+	if m.confirmAction != nil {
+		return renderConfirmDialog(*m.confirmAction, m.detail, m.width, m.height)
+	}
+
+	if m.showActions {
+		return renderActions(m.actionCursor, m.entireCLIAvailable, m.detail != nil, m.width, m.height)
+	}
+
 	if m.showHelp {
 		return renderHelp(m.width, m.height)
 	}
@@ -127,6 +172,11 @@ func (m model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, keys.Help):
 		m.showHelp = !m.showHelp
+		return m, nil
+
+	case key.Matches(msg, keys.Actions):
+		m.showActions = true
+		m.actionCursor = 0
 		return m, nil
 
 	case key.Matches(msg, keys.Refresh):
@@ -293,7 +343,7 @@ func (m model) renderDetailScreen() string {
 	headerPanel := panelStyle.Width(panelWidth).Render(header)
 	headerHeight := lipgloss.Height(headerPanel)
 
-	footerContent := dimStyle.Render("esc back  j/k scroll  tab switch  1-3 tabs  ? help  q quit")
+	footerContent := dimStyle.Render("esc back  j/k scroll  tab switch  1-3 tabs  a actions  ? help  q quit")
 	footerPanel := panelStyle.Width(panelWidth).Render(footerContent)
 	footerHeight := lipgloss.Height(footerPanel)
 
@@ -357,7 +407,7 @@ func (m model) renderFooterContent() string {
 		leftSide += "  ·  " + formatTokensShort(m.stats.TotalTokens)
 	}
 
-	rightSide := "j/k navigate  enter select  / filter  ? help  q quit"
+	rightSide := "j/k navigate  enter select  / filter  a actions  ? help  q quit"
 
 	padding := m.width - 6 - lipgloss.Width(leftSide) - lipgloss.Width(rightSide)
 	if padding < 2 {
