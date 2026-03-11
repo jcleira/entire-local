@@ -6,7 +6,9 @@ RED=\033[0;31m
 GREEN=\033[0;32m
 NC=\033[0m
 
-.PHONY: all build clean test install fmt vet lint check deps help
+DEMOS=menu status explain doctor rewind resume reset clean
+
+.PHONY: all build clean test install fmt vet lint check deps demo $(addprefix demo-,$(DEMOS)) help
 
 help:
 	@echo "entire-local Makefile"
@@ -19,6 +21,8 @@ help:
 	@echo "  install  Install to ~/go/bin"
 	@echo "  clean    Remove build artifacts"
 	@echo "  deps     Download dependencies"
+	@echo "  demo          Record all demo GIFs"
+	@echo "  demo-<name>   Record one GIF (menu status explain doctor rewind resume reset clean)"
 	@echo "  fmt      Format code"
 	@echo "  vet      Run go vet"
 
@@ -56,6 +60,14 @@ lint:
 
 check: fmt vet lint
 	@echo "${GREEN}✓${NC} All checks passed"
+
+demo: build $(addprefix demo-,$(DEMOS))
+	@echo "${GREEN}✓${NC} All demos recorded in demo/"
+
+$(addprefix demo-,$(DEMOS)): demo-%: build
+	@echo "Recording $*..."
+	@vhs demo/$*.tape
+	@echo "${GREEN}✓${NC} demo/$*.gif"
 
 deps:
 	@go mod download
