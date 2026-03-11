@@ -96,4 +96,14 @@ var (
 	diffFileHeaderStyle = lipgloss.NewStyle().
 				Foreground(subtle).
 				Bold(true)
+
+	warningStyle = lipgloss.NewStyle().
+			Foreground(accent).
+			Bold(true)
+
+	disabledStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240"))
+
+	actionSepStyle = lipgloss.NewStyle().
+			Foreground(subtle)
 )

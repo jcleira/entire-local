@@ -16,6 +16,7 @@ func renderHelp(width, height int) string {
 		{"Shift+Tab", "Previous tab"},
 		{"1-3", "Jump to tab"},
 		{"r", "Refresh data"},
+		{"a", "Actions menu"},
 		{"?", "Toggle help"},
 		{"q", "Quit"},
 	}

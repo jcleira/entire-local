@@ -32,3 +32,15 @@ type transcriptLoadedMsg struct {
 type errMsg struct {
 	err error
 }
+
+type entireCLIDetectedMsg struct {
+	available bool
+}
+
+type entireCmdFinishedMsg struct {
+	err error
+}
+
+type entireCmdOutputMsg struct {
+	output string
+}
