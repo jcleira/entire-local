@@ -1,0 +1,205 @@
+Implement the following plan:
+
+# Plan: Add entire.io CLI commands to the TUI (approved)
+
+## Context
+The entire.io CLI has commands like `status`, `explain`, `doctor`, `rewind`, `resume`, `reset`, and `clean`. entire-local currently only reads checkpoint data. We want to mirror these commands in the TUI by shelling out to the `entire` CLI binary, making entire-local a full interface for entire.io.
+
+## UX Design: Action Menu
+
+Triggered by pressing `a` (matching the existing pattern of single-key modes like `/` for filter, `?` for help). Shows a centered overlay box (same pattern as `help.go`).
+
+**Menu items:**
+```
+Actions
+─────────────────────────────
+ [s]  Status       Show entire.io state
+ [e]  Explain      AI analysis of checkpoint
+ [d]  Doctor       Diagnose stuck sessions
+ [w]  Rewind       Rewind to checkpoint
+ [m]  Resume       Resume session on branch
+ [x]  Reset        Delete session state
+ [c]  Clean        Remove orphaned data
+─────────────────────────────
+ esc  Close
+```
+
+- Checkpoint-specific items (`explain`, `rewind`, `resume`, `reset`) are dimmed/hidden on the overview screen
+- All items disabled with warning when `entire` CLI is not installed
+- Navigate with `j/k`, select with `Enter` or shortcut key
+
+## Execution Strategy
+
+| Command | Mode | Confirmation | Notes |
+|---------|------|-------------|-------|
+| `status` | Capture output, show in overlay | No | `entire status --detailed` |
+| `explain` | `tea.ExecProcess` | No | `entire explain -c <id>` -- may stream/generate |
+| `doctor` | `tea.ExecProcess` | No | Interactive (offers fix options) |
+| `rewind` | `tea.ExecProcess` | Yes | `entire rewind --to <commit>` -- destructive |
+| `resume` | `tea.ExecProcess` | Yes | `entire resume <branch>` -- changes branch |
+| `reset` | `tea.ExecProcess` | Yes | `entire reset` -- destructive |
+| `clean` | `tea.ExecProcess` | Yes | `entire clean` -- destructive |
+
+- **`tea.ExecProcess`**: Suspends TUI, runs command in real terminal, resumes TUI on exit. Good for interactive/long-running/destructive commands.
+- **Capture**: Runs `exec.Command().CombinedOutput()` in a `tea.Cmd`, shows result in a scrollable overlay. Good for quick read-only output.
+- After any write command completes, refresh checkpoint data via `m.loadCheckpoints()`.
+
+## Confirmation Flow
+
+For destructive commands (`rewind`, `resume`, `reset`, `clean`):
+1. User selects action from menu
+2. Confirmation overlay appears: `"Rewind to checkpoint abc1234? This will reset your working tree. (y/n)"`
+3. `y` proceeds, `n`/`Esc` cancels
+
+## Files to Create
+
+| File | Purpose |
+|------|---------|
+| `pkg/ui/dashboard/actions.go` | Action menu: item definitions, rendering, navigation, `buildEntireArgs()` |
+| `pkg/ui/dashboard/confirm.go` | Confirmation dialog: rendering, y/n handling |
+| `pkg/ui/dashboard/command_output.go` | Scrollable overlay for captured command output (used by `status`) |
+
+## Files to Modify
+
+| File | Changes |
+|------|---------|
+| `dashboard.go` | Add fields to `model` (`showActions`, `actionCursor`, `entireCLIAvailable`, `confirmAction`, `commandOutput`, `showCommandOutput`). Wire overlays into `Update()` priority chain and `View()`. Add `detectEntireCLI()` to `Init()` via `tea.Batch`. |
+| `keys.go` | Add `Actions` (`a`), `Confirm` (`y`), `Deny` (`n`) key bindings |
+| `messages.go` | Add `entireCLIDetectedMsg`, `entireCmdFinishedMsg`, `entireCmdOutputMsg` |
+| `styles.go` | Add `warningStyle`, `disabledStyle`, `actionSepStyle` |
+| `help.go` | Add `a` -> `"Actions menu"` to help bindings |
+
+## Implementation Steps
+
+### Step 1: New message types and CLI detection
+- Add msg types to `messages.go`
+- Add `detectEntireCLI() tea.Cmd` using `exec.LookPath("entire")` in a new file `actions.go`
+- Wire detection into `model.Init()` with `tea.Batch(m.loadCheckpoints(), detectEntireCLI())`
+- Handle `entireCLIDetectedMsg` in `Update()`
+
+### Step 2: Action menu definitions and rendering (`actions.go`)
+- Define `entireAction` enum and `actionItem` struct (key, label, desc, requiresCheckpoint, destructive, execProcess)
+- Define the 7 action items as a package-level slice
+- Render function following `help.go` centered-box pattern
+- Navigation: j/k cursor, Enter/shortcut-key select, Esc close
+- `buildEntireArgs(action, detail)` maps actions to CLI args
+
+### Step 3: Confirmation dialog (`confirm.go`)
+- Render centered box with warning text and `y/n` prompt
+- `handleConfirmKeys`: `y` -> execute, `n`/`Esc` -> cancel
+- Confirmation messages per action (describing consequence)
+
+### Step 4: Command output overlay (`command_output.go`)
+- Scrollable panel for `status` output
+- j/k scroll, Esc to close
+- Reuses existing scroll patterns from detail view
+
+### Step 5: Wire into dashboard.go
+- Add new model fields
+- `Update()` priority chain: commandOutput > confirm > actions > filtering > normal
+- `View()` overlay priority: commandOutput > confirm > actions > help > normal screen
+- Action execution:
+  - ExecProcess commands: `tea.ExecProcess(exec.Command("entire", args...), callback)`
+  - Capture commands: `tea.Cmd` that runs `exec.Command().CombinedOutput()`
+- Post-command: refresh checkpoints, clear state
+
+### Step 6: Keys, styles, help updates
+- Add key bindings in `keys.go`
+- Add styles in `styles.go` (reuse existing colors: warning=accent/214, disabled=very dim)
+- Add `a` action to help screen
+- Update footer hints in both overview and detail screens
+
+## Key Patterns to Follow
+- `help.go` centered overlay box pattern for action menu, confirm, and output
+- `messages.go` simple struct msg types
+- `keys.go` `key.NewBinding()` pattern
+- No comments inside function bodies
+- Warm orange theme (208/214 palette)
+- `exec.Command` pattern from `pkg/git/git.go`
+
+## Verification
+- `make build && make test && make lint` pass
+- Press `a` on overview: see global commands, checkpoint-specific items dimmed
+- Press `a` on detail: see all commands enabled
+- Select `status`: overlay shows `entire status --detailed` output
+- Select `explain`: TUI suspends, `entire explain` runs, TUI resumes
+- Select `rewind` on detail: confirmation dialog, then `entire rewind` runs
+- When `entire` not installed: all items disabled with warning
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/arvos/.claude/projects/-Users-arvos-Tactic-workspaces-workspace-entire-local-cli-entire-local/17cf695e-a6fa-420f-87d3-794fea032082.jsonl
+
+---
+
+what are the actions I could do now
+
+---
+
+I mean, actions in the TUI what entire CLI commands I can issue
+
+---
+
+give me a commit message for this changes
+
+---
+
+could we write a vhs demo that showcase all the things we've done?
+
+---
+
+do an entry on the makefile to run the demo
+
+---
+
+➜  entire-local git:(add-cli-actions) ✗ make demo
+Building entire-local...
+✓ Build complete: entire-local
+Recording demo...
+File: demo.tape
+Output .gif demo.gif
+Require entire-local
+failed to execute command: exec: "entire-local": executable file not found in $PATH
+recording failed
+make: *** [demo] Error 1
+
+---
+
+that doesn look like my terminal the fonts are really off there
+
+---
+
+I want just to use the fucking ghostty settings I got, that's not using my font
+
+---
+
+how do I run it on preview?
+
+---
+
+when I do that it opens and stay on the first frame
+
+---
+
+I use brave
+
+---
+
+Oky, lest's please create a single gif per action
+
+---
+
+on those that you execute an action instead of using the key navigate with the cursror
+
+---
+
+okay cool I want you now if you could please to write a series of twits for mi like:
+
+:wave: I just added the CLI commands to the entire local CLI, going through them is kind of like going through the different optionst that the CLI have for you.
+
+---
+
+Then go one by one for the commands with one explanation about what they do we will do a thread
+
+---
+
+okay can we commit this and add all the demo and the commands to the readme?
